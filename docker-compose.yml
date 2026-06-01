@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: clouddrop_postgres
+    environment:
+      POSTGRES_USER: chukwudinwodi
+      POSTGRES_PASSWORD:
+      POSTGRES_DB: postgres
+    ports:
+      - '5432:5432'
+    volumes:
+      - clouddrop_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  clouddrop_pgdata:
