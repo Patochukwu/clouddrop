@@ -1,0 +1,8 @@
+{
+  "name": "clouddrop",
+  "version": "1.0.0",
+  "description": "CloudDrop S3 storage app workspace",
+  "scripts": {
+    "dev": "docker compose up -d && npx -y concurrently \"npm run dev --prefix server\" \"npm run dev --prefix client\""
+  }
+}

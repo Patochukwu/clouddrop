@@ -5,11 +5,12 @@ import {
 } from 'lucide-react';
 
 const formatBytes = (bytes) => {
-  if (!bytes) return '0 B';
+  const parsed = Number(bytes);
+  if (isNaN(parsed) || parsed <= 0) return '0 B';
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(Math.max(bytes, 1)) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  const i = Math.floor(Math.log(parsed) / Math.log(k));
+  return parseFloat((parsed / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
 
 const formatDate = (iso) => {

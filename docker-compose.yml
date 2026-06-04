@@ -6,8 +6,8 @@ services:
     container_name: clouddrop_postgres
     environment:
       POSTGRES_USER: chukwudinwodi
-      POSTGRES_PASSWORD:
-      POSTGRES_DB: postgres
+      POSTGRES_DB: clouddrop
+      POSTGRES_HOST_AUTH_METHOD: trust
     ports:
       - '5432:5432'
     volumes:

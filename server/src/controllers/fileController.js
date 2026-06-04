@@ -1,7 +1,8 @@
 const pool = require('../db/pool');
 const { s3, getCategory } = require('../middleware/uploadMiddleware');
-const { DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const path = require('path');
 
 // ── Upload file ────────────────────────────────────────────────
 const uploadFile = async (req, res, next) => {
@@ -13,11 +14,16 @@ const uploadFile = async (req, res, next) => {
     const { originalname, mimetype, size, key, location } = req.file;
     const category = getCategory(mimetype);
 
+    let fileSize = Number(size || req.body.size);
+    if (isNaN(fileSize) || fileSize < 0) {
+      fileSize = 0;
+    }
+
     const result = await pool.query(
       `INSERT INTO files (original_name, s3_key, s3_url, mime_type, size, category)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [originalname, key, location, mimetype, size, category]
+      [originalname, key, location, mimetype, fileSize, category]
     );
 
     res.status(201).json({
@@ -32,6 +38,59 @@ const uploadFile = async (req, res, next) => {
 // ── List files ────────────────────────────────────────────────
 const listFiles = async (req, res, next) => {
   try {
+    // ─── Sync with AWS S3 first ──────────────────────────────
+    try {
+      const s3Command = new ListObjectsV2Command({
+        Bucket: process.env.S3_BUCKET_NAME,
+        Prefix: 'uploads/',
+      });
+      const s3Data = await s3.send(s3Command);
+      const s3Objects = (s3Data.Contents || []).filter(item => item.Key !== 'uploads/');
+
+      // Fetch all files currently tracked in the database
+      const dbResult = await pool.query('SELECT s3_key FROM files');
+      const dbKeys = new Set(dbResult.rows.map(row => row.s3_key));
+      const s3Keys = new Set(s3Objects.map(obj => obj.Key));
+
+      // 1. Insert new files found in S3 that are missing from local DB
+      for (const obj of s3Objects) {
+        if (!dbKeys.has(obj.Key)) {
+          const originalName = obj.Key.substring(obj.Key.lastIndexOf('/') + 1);
+          const ext = path.extname(originalName).toLowerCase();
+          
+          // Basic MIME type inference
+          let mimeType = 'application/octet-stream';
+          if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
+          else if (ext === '.png') mimeType = 'image/png';
+          else if (ext === '.gif') mimeType = 'image/gif';
+          else if (ext === '.mp3') mimeType = 'audio/mpeg';
+          else if (ext === '.mp4') mimeType = 'video/mp4';
+          else if (ext === '.pdf') mimeType = 'application/pdf';
+          else if (ext === '.zip') mimeType = 'application/zip';
+          else if (ext === '.txt') mimeType = 'text/plain';
+
+          const category = getCategory(mimeType);
+          const location = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${obj.Key}`;
+
+          await pool.query(
+            `INSERT INTO files (original_name, s3_key, s3_url, mime_type, size, category, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [originalName, obj.Key, location, mimeType, obj.Size, category, obj.LastModified]
+          );
+        }
+      }
+
+      // 2. Remove files from local DB that no longer exist in S3
+      for (const dbKey of dbKeys) {
+        if (!s3Keys.has(dbKey)) {
+          await pool.query('DELETE FROM files WHERE s3_key = $1', [dbKey]);
+        }
+      }
+    } catch (s3SyncErr) {
+      console.error('⚠️ S3 sync warning (offline or config issue):', s3SyncErr.message);
+    }
+
+    // ─── Query database files (as normal) ────────────────────
     const { category, search } = req.query;
     let query = 'SELECT * FROM files';
     const params = [];
