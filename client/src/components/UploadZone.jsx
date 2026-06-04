@@ -2,11 +2,12 @@ import React, { useState, useRef, useCallback } from 'react';
 import { Upload, X, FileUp } from 'lucide-react';
 
 const formatBytes = (bytes) => {
-  if (!bytes) return '';
+  const parsed = Number(bytes);
+  if (isNaN(parsed) || parsed <= 0) return '';
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  const i = Math.floor(Math.log(parsed) / Math.log(k));
+  return parseFloat((parsed / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
 
 export default function UploadZone({ onUpload, uploading, progress }) {

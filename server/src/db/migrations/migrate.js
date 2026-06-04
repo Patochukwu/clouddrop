@@ -1,21 +1,26 @@
-require('dotenv').config({ path: require('path').resolve(__dirname, '../../../.env') });
 const fs = require('fs');
 const path = require('path');
 const pool = require('../pool');
 
-async function migrate() {
+async function runMigrations() {
   const sql = fs.readFileSync(
     path.join(__dirname, '001_create_files.sql'),
     'utf8'
   );
   try {
     await pool.query(sql);
-    console.log('✅ Migration applied successfully');
+    console.log('✅ Database migration check/apply successful');
   } catch (err) {
-    console.error('❌ Migration failed:', err.message);
-  } finally {
-    await pool.end();
+    console.error('❌ Database migration failed:', err.message);
+    throw err;
   }
 }
 
-migrate();
+if (require.main === module) {
+  require('dotenv').config({ path: path.resolve(__dirname, '../../../.env') });
+  runMigrations()
+    .then(() => pool.end())
+    .catch(() => process.exit(1));
+}
+
+module.exports = { runMigrations };

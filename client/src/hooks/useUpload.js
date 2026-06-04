@@ -13,6 +13,7 @@ export const useUpload = (onSuccess) => {
 
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('size', file.size.toString());
 
     try {
       await filesApi.uploadFile(formData, setProgress);
