@@ -4,6 +4,38 @@ const { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command } = require(
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const path = require('path');
 
+// Helper to check if database is configured
+const isDbEnabled = () => {
+  return !!process.env.DATABASE_URL;
+};
+
+// Helper to encode S3 key as a safe URL parameter ID
+const keyToId = (key) => Buffer.from(key).toString('hex');
+
+// Helper to decode a hex ID back to S3 key
+const idToKey = (id) => {
+  try {
+    if (id.length > 20 && /^[0-9a-fA-F]+$/.test(id)) {
+      return Buffer.from(id, 'hex').toString('utf-8');
+    }
+  } catch (e) {}
+  return id;
+};
+
+// Helper to infer mime type from file extension
+const inferMimeType = (filename) => {
+  const ext = path.extname(filename).toLowerCase();
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.gif') return 'image/gif';
+  if (ext === '.mp3') return 'audio/mpeg';
+  if (ext === '.mp4') return 'video/mp4';
+  if (ext === '.pdf') return 'application/pdf';
+  if (ext === '.zip') return 'application/zip';
+  if (ext === '.txt') return 'text/plain';
+  return 'application/octet-stream';
+};
+
 // ── Upload file ────────────────────────────────────────────────
 const uploadFile = async (req, res, next) => {
   try {
@@ -19,16 +51,38 @@ const uploadFile = async (req, res, next) => {
       fileSize = 0;
     }
 
-    const result = await pool.query(
-      `INSERT INTO files (original_name, s3_key, s3_url, mime_type, size, category)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING *`,
-      [originalname, key, location, mimetype, fileSize, category]
-    );
+    let fileData;
+
+    if (isDbEnabled()) {
+      try {
+        const result = await pool.query(
+          `INSERT INTO files (original_name, s3_key, s3_url, mime_type, size, category)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING *`,
+          [originalname, key, location, mimetype, fileSize, category]
+        );
+        fileData = result.rows[0];
+      } catch (dbErr) {
+        console.error('⚠️ DB Insert failed, falling back to S3-Only return structure:', dbErr.message);
+      }
+    }
+
+    if (!fileData) {
+      fileData = {
+        id: keyToId(key),
+        original_name: originalname,
+        s3_key: key,
+        s3_url: location,
+        mime_type: mimetype,
+        size: fileSize,
+        category: category,
+        created_at: new Date().toISOString(),
+      };
+    }
 
     res.status(201).json({
       message: 'File uploaded successfully',
-      file: result.rows[0],
+      file: fileData,
     });
   } catch (err) {
     next(err);
@@ -38,82 +92,113 @@ const uploadFile = async (req, res, next) => {
 // ── List files ────────────────────────────────────────────────
 const listFiles = async (req, res, next) => {
   try {
-    // ─── Sync with AWS S3 first ──────────────────────────────
+    let s3Objects = [];
+    let s3SyncSuccess = false;
+
+    // ─── Fetch from S3 ───
     try {
       const s3Command = new ListObjectsV2Command({
         Bucket: process.env.S3_BUCKET_NAME,
         Prefix: 'uploads/',
       });
       const s3Data = await s3.send(s3Command);
-      const s3Objects = (s3Data.Contents || []).filter(item => item.Key !== 'uploads/');
-
-      // Fetch all files currently tracked in the database
-      const dbResult = await pool.query('SELECT s3_key FROM files');
-      const dbKeys = new Set(dbResult.rows.map(row => row.s3_key));
-      const s3Keys = new Set(s3Objects.map(obj => obj.Key));
-
-      // 1. Insert new files found in S3 that are missing from local DB
-      for (const obj of s3Objects) {
-        if (!dbKeys.has(obj.Key)) {
-          const originalName = obj.Key.substring(obj.Key.lastIndexOf('/') + 1);
-          const ext = path.extname(originalName).toLowerCase();
-          
-          // Basic MIME type inference
-          let mimeType = 'application/octet-stream';
-          if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
-          else if (ext === '.png') mimeType = 'image/png';
-          else if (ext === '.gif') mimeType = 'image/gif';
-          else if (ext === '.mp3') mimeType = 'audio/mpeg';
-          else if (ext === '.mp4') mimeType = 'video/mp4';
-          else if (ext === '.pdf') mimeType = 'application/pdf';
-          else if (ext === '.zip') mimeType = 'application/zip';
-          else if (ext === '.txt') mimeType = 'text/plain';
-
-          const category = getCategory(mimeType);
-          const location = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${obj.Key}`;
-
-          await pool.query(
-            `INSERT INTO files (original_name, s3_key, s3_url, mime_type, size, category, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [originalName, obj.Key, location, mimeType, obj.Size, category, obj.LastModified]
-          );
-        }
-      }
-
-      // 2. Remove files from local DB that no longer exist in S3
-      for (const dbKey of dbKeys) {
-        if (!s3Keys.has(dbKey)) {
-          await pool.query('DELETE FROM files WHERE s3_key = $1', [dbKey]);
-        }
-      }
+      s3Objects = (s3Data.Contents || []).filter(item => item.Key !== 'uploads/');
+      s3SyncSuccess = true;
     } catch (s3SyncErr) {
-      console.error('⚠️ S3 sync warning (offline or config issue):', s3SyncErr.message);
+      console.error('⚠️ S3 listing failed:', s3SyncErr.message);
     }
 
-    // ─── Query database files (as normal) ────────────────────
+    // ─── Sync S3 to DB if enabled ───
+    if (isDbEnabled() && s3SyncSuccess) {
+      try {
+        const dbResult = await pool.query('SELECT s3_key FROM files');
+        const dbKeys = new Set(dbResult.rows.map(row => row.s3_key));
+        const s3Keys = new Set(s3Objects.map(obj => obj.Key));
+
+        // Insert missing keys
+        for (const obj of s3Objects) {
+          if (!dbKeys.has(obj.Key)) {
+            const originalName = obj.Key.substring(obj.Key.lastIndexOf('/') + 1);
+            const mimeType = inferMimeType(originalName);
+            const category = getCategory(mimeType);
+            const location = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${obj.Key}`;
+
+            await pool.query(
+              `INSERT INTO files (original_name, s3_key, s3_url, mime_type, size, category, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+              [originalName, obj.Key, location, mimeType, obj.Size, category, obj.LastModified]
+            );
+          }
+        }
+
+        // Delete keys not in S3
+        for (const dbKey of dbKeys) {
+          if (!s3Keys.has(dbKey)) {
+            await pool.query('DELETE FROM files WHERE s3_key = $1', [dbKey]);
+          }
+        }
+      } catch (dbErr) {
+        console.error('⚠️ DB Sync failed, falling back to direct S3 listings:', dbErr.message);
+      }
+    }
+
+    // ─── Return Output ───
     const { category, search } = req.query;
-    let query = 'SELECT * FROM files';
-    const params = [];
-    const conditions = [];
+
+    if (isDbEnabled()) {
+      try {
+        let query = 'SELECT * FROM files';
+        const params = [];
+        const conditions = [];
+
+        if (category && category !== 'All') {
+          params.push(category);
+          conditions.push(`category = $${params.length}`);
+        }
+
+        if (search) {
+          params.push(`%${search}%`);
+          conditions.push(`original_name ILIKE $${params.length}`);
+        }
+
+        if (conditions.length) {
+          query += ' WHERE ' + conditions.join(' AND ');
+        }
+
+        query += ' ORDER BY created_at DESC';
+
+        const result = await pool.query(query, params);
+        return res.json({ files: result.rows });
+      } catch (dbQueryErr) {
+        console.error('⚠️ DB Query failed, falling back to direct S3 listings:', dbQueryErr.message);
+      }
+    }
+
+    // Direct S3 fallback listing
+    let filesList = s3Objects.map(obj => {
+      const originalName = obj.Key.substring(obj.Key.lastIndexOf('/') + 1);
+      const mimeType = inferMimeType(originalName);
+      return {
+        id: keyToId(obj.Key),
+        original_name: originalName,
+        s3_key: obj.Key,
+        s3_url: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${obj.Key}`,
+        mime_type: mimeType,
+        size: obj.Size,
+        category: getCategory(mimeType),
+        created_at: obj.LastModified,
+      };
+    });
 
     if (category && category !== 'All') {
-      params.push(category);
-      conditions.push(`category = $${params.length}`);
+      filesList = filesList.filter(f => f.category.toLowerCase() === category.toLowerCase());
     }
-
     if (search) {
-      params.push(`%${search}%`);
-      conditions.push(`original_name ILIKE $${params.length}`);
+      filesList = filesList.filter(f => f.original_name.toLowerCase().includes(search.toLowerCase()));
     }
 
-    if (conditions.length) {
-      query += ' WHERE ' + conditions.join(' AND ');
-    }
-
-    query += ' ORDER BY created_at DESC';
-
-    const result = await pool.query(query, params);
-    res.json({ files: result.rows });
+    filesList.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    res.json({ files: filesList });
   } catch (err) {
     next(err);
   }
@@ -122,14 +207,33 @@ const listFiles = async (req, res, next) => {
 // ── Get stats ──────────────────────────────────────────────────
 const getStats = async (_req, res, next) => {
   try {
-    const result = await pool.query(
-      'SELECT COUNT(*) AS total_files, COALESCE(SUM(size), 0) AS total_size FROM files'
-    );
-    const { total_files, total_size } = result.rows[0];
-    res.json({
-      totalFiles: parseInt(total_files, 10),
-      totalSize: parseInt(total_size, 10),
+    if (isDbEnabled()) {
+      try {
+        const result = await pool.query(
+          'SELECT COUNT(*) AS total_files, COALESCE(SUM(size), 0) AS total_size FROM files'
+        );
+        const { total_files, total_size } = result.rows[0];
+        return res.json({
+          totalFiles: parseInt(total_files, 10),
+          totalSize: parseInt(total_size, 10),
+        });
+      } catch (dbErr) {
+        console.error('⚠️ DB Stats query failed:', dbErr.message);
+      }
+    }
+
+    // Direct S3 fallback stats
+    const command = new ListObjectsV2Command({
+      Bucket: process.env.S3_BUCKET_NAME,
+      Prefix: 'uploads/',
     });
+    const s3Data = await s3.send(command);
+    const s3Objects = (s3Data.Contents || []).filter(item => item.Key !== 'uploads/');
+
+    const totalFiles = s3Objects.length;
+    const totalSize = s3Objects.reduce((acc, item) => acc + item.Size, 0);
+
+    res.json({ totalFiles, totalSize });
   } catch (err) {
     next(err);
   }
@@ -140,27 +244,43 @@ const downloadFile = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { preview } = req.query;
-    const result = await pool.query('SELECT * FROM files WHERE id = $1', [id]);
+    let s3Key = '';
+    let originalName = '';
+    let mimeType = 'application/octet-stream';
 
-    if (!result.rows.length) {
-      return res.status(404).json({ error: 'File not found' });
+    if (isDbEnabled()) {
+      try {
+        const result = await pool.query('SELECT * FROM files WHERE id = $1', [id]);
+        if (result.rows.length) {
+          const file = result.rows[0];
+          s3Key = file.s3_key;
+          originalName = file.original_name;
+          mimeType = file.mime_type;
+        }
+      } catch (dbErr) {
+        console.error('⚠️ DB download query failed:', dbErr.message);
+      }
     }
 
-    const file = result.rows[0];
+    if (!s3Key) {
+      s3Key = idToKey(id);
+      originalName = s3Key.substring(s3Key.lastIndexOf('/') + 1);
+      mimeType = inferMimeType(originalName);
+    }
+
     const s3Params = {
       Bucket: process.env.S3_BUCKET_NAME,
-      Key: file.s3_key,
+      Key: s3Key,
     };
 
     if (preview === 'true') {
       s3Params.ResponseContentDisposition = 'inline';
-      s3Params.ResponseContentType = file.mime_type;
+      s3Params.ResponseContentType = mimeType;
     } else {
-      s3Params.ResponseContentDisposition = `attachment; filename="${file.original_name}"`;
+      s3Params.ResponseContentDisposition = `attachment; filename="${originalName}"`;
     }
 
     const command = new GetObjectCommand(s3Params);
-
     const url = await getSignedUrl(s3, command, { expiresIn: 3600 });
     res.json({ url });
   } catch (err) {
@@ -172,24 +292,39 @@ const downloadFile = async (req, res, next) => {
 const deleteFile = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const result = await pool.query(
-      'DELETE FROM files WHERE id = $1 RETURNING *',
-      [id]
-    );
+    let s3Key = '';
+    let deletedFile = null;
 
-    if (!result.rows.length) {
-      return res.status(404).json({ error: 'File not found' });
+    if (isDbEnabled()) {
+      try {
+        const result = await pool.query(
+          'DELETE FROM files WHERE id = $1 RETURNING *',
+          [id]
+        );
+        if (result.rows.length) {
+          deletedFile = result.rows[0];
+          s3Key = deletedFile.s3_key;
+        }
+      } catch (dbErr) {
+        console.error('⚠️ DB delete query failed:', dbErr.message);
+      }
     }
 
-    const file = result.rows[0];
+    if (!s3Key) {
+      s3Key = idToKey(id);
+      deletedFile = {
+        id,
+        s3_key: s3Key,
+        original_name: s3Key.substring(s3Key.lastIndexOf('/') + 1),
+      };
+    }
 
-    // Remove from S3
     await s3.send(new DeleteObjectCommand({
       Bucket: process.env.S3_BUCKET_NAME,
-      Key: file.s3_key,
+      Key: s3Key,
     }));
 
-    res.json({ message: 'File deleted successfully', file });
+    res.json({ message: 'File deleted successfully', file: deletedFile });
   } catch (err) {
     next(err);
   }
