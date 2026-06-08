@@ -8,8 +8,8 @@ set -e
 echo "▶ Updating system..."
 sudo apt-get update -y && sudo apt-get upgrade -y
 
-echo "▶ Installing Node.js 20 & PostgreSQL..."
-curl -4fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+echo "▶ Installing Node.js 24 & PostgreSQL..."
+curl -4fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt-get install -y nodejs git postgresql postgresql-contrib
 
 echo "▶ Configuring PostgreSQL..."
