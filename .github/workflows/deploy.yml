@@ -39,7 +39,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd /home/ubuntu/clouddrop
-            git pull origin main
+            git pull origin clouddrop
             cd server && npm ci
             cd ../client && npm ci && npm run build
             pm2 restart clouddrop-server || pm2 start server/server.js --name clouddrop-server
