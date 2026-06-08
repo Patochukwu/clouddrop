@@ -92,61 +92,52 @@ const uploadFile = async (req, res, next) => {
 // ── List files ────────────────────────────────────────────────
 const listFiles = async (req, res, next) => {
   try {
-    let s3Objects = [];
-    let s3SyncSuccess = false;
-
-    // ─── Fetch from S3 ───
-    try {
-      const s3Command = new ListObjectsV2Command({
-        Bucket: process.env.S3_BUCKET_NAME,
-        Prefix: 'uploads/',
-      });
-      const s3Data = await s3.send(s3Command);
-      s3Objects = (s3Data.Contents || []).filter(item => item.Key !== 'uploads/');
-      s3SyncSuccess = true;
-    } catch (s3SyncErr) {
-      console.error('⚠️ S3 listing failed:', s3SyncErr.message);
-    }
-
-    // ─── Sync S3 to DB if enabled ───
-    if (isDbEnabled() && s3SyncSuccess) {
-      try {
-        const dbResult = await pool.query('SELECT s3_key FROM files');
-        const dbKeys = new Set(dbResult.rows.map(row => row.s3_key));
-        const s3Keys = new Set(s3Objects.map(obj => obj.Key));
-
-        // Insert missing keys
-        for (const obj of s3Objects) {
-          if (!dbKeys.has(obj.Key)) {
-            const originalName = obj.Key.substring(obj.Key.lastIndexOf('/') + 1);
-            const mimeType = inferMimeType(originalName);
-            const category = getCategory(mimeType);
-            const location = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${obj.Key}`;
-            const fileSize = Number(obj.Size || 0);
-
-            await pool.query(
-              `INSERT INTO files (original_name, s3_key, s3_url, mime_type, size, category, created_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-              [originalName, obj.Key, location, mimeType, fileSize, category, obj.LastModified]
-            );
-          }
-        }
-
-        // Delete keys not in S3
-        for (const dbKey of dbKeys) {
-          if (!s3Keys.has(dbKey)) {
-            await pool.query('DELETE FROM files WHERE s3_key = $1', [dbKey]);
-          }
-        }
-      } catch (dbErr) {
-        console.error('⚠️ DB Sync failed, falling back to direct S3 listings:', dbErr.message);
-      }
-    }
-
-    // ─── Return Output ───
+    // ─── Return Output from DB immediately (super fast) ───
     const { category, search } = req.query;
 
     if (isDbEnabled()) {
+      // ─── Background Sync S3 to DB (Prevents API Lag) ───
+      (async () => {
+        try {
+          const s3Command = new ListObjectsV2Command({
+            Bucket: process.env.S3_BUCKET_NAME,
+            Prefix: 'uploads/',
+          });
+          const s3Data = await s3.send(s3Command);
+          const s3Objects = (s3Data.Contents || []).filter(item => item.Key !== 'uploads/');
+
+          const dbResult = await pool.query('SELECT s3_key FROM files');
+          const dbKeys = new Set(dbResult.rows.map(row => row.s3_key));
+          const s3Keys = new Set(s3Objects.map(obj => obj.Key));
+
+          // Insert missing keys
+          for (const obj of s3Objects) {
+            if (!dbKeys.has(obj.Key)) {
+              const originalName = obj.Key.substring(obj.Key.lastIndexOf('/') + 1);
+              const mimeType = inferMimeType(originalName);
+              const fileCat = getCategory(mimeType);
+              const location = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${obj.Key}`;
+              const fileSize = Number(obj.Size || 0);
+
+              await pool.query(
+                `INSERT INTO files (original_name, s3_key, s3_url, mime_type, size, category, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (s3_key) DO NOTHING`,
+                [originalName, obj.Key, location, mimeType, fileSize, fileCat, obj.LastModified]
+              );
+            }
+          }
+
+          // Delete keys not in S3
+          for (const dbKey of dbKeys) {
+            if (!s3Keys.has(dbKey)) {
+              await pool.query('DELETE FROM files WHERE s3_key = $1', [dbKey]);
+            }
+          }
+        } catch (syncErr) {
+          console.error('⚠️ Background DB Sync failed:', syncErr.message);
+        }
+      })();
+
       try {
         let query = 'SELECT * FROM files';
         const params = [];
