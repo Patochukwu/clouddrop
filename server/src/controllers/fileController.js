@@ -122,11 +122,12 @@ const listFiles = async (req, res, next) => {
             const mimeType = inferMimeType(originalName);
             const category = getCategory(mimeType);
             const location = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${obj.Key}`;
+            const fileSize = Number(obj.Size || 0);
 
             await pool.query(
               `INSERT INTO files (original_name, s3_key, s3_url, mime_type, size, category, created_at)
                VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-              [originalName, obj.Key, location, mimeType, obj.Size, category, obj.LastModified]
+              [originalName, obj.Key, location, mimeType, fileSize, category, obj.LastModified]
             );
           }
         }
@@ -184,7 +185,7 @@ const listFiles = async (req, res, next) => {
         s3_key: obj.Key,
         s3_url: `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${obj.Key}`,
         mime_type: mimeType,
-        size: obj.Size,
+        size: Number(obj.Size || 0),
         category: getCategory(mimeType),
         created_at: obj.LastModified,
       };
@@ -210,12 +211,12 @@ const getStats = async (_req, res, next) => {
     if (isDbEnabled()) {
       try {
         const result = await pool.query(
-          'SELECT COUNT(*) AS total_files, COALESCE(SUM(size), 0) AS total_size FROM files'
+          'SELECT COUNT(*)::integer AS total_files, COALESCE(SUM(size), 0)::bigint AS total_size FROM files'
         );
         const { total_files, total_size } = result.rows[0];
         return res.json({
-          totalFiles: parseInt(total_files, 10),
-          totalSize: parseInt(total_size, 10),
+          totalFiles: Number(total_files || 0),
+          totalSize: Number(total_size || 0),
         });
       } catch (dbErr) {
         console.error('⚠️ DB Stats query failed:', dbErr.message);
@@ -231,7 +232,7 @@ const getStats = async (_req, res, next) => {
     const s3Objects = (s3Data.Contents || []).filter(item => item.Key !== 'uploads/');
 
     const totalFiles = s3Objects.length;
-    const totalSize = s3Objects.reduce((acc, item) => acc + item.Size, 0);
+    const totalSize = s3Objects.reduce((acc, item) => acc + Number(item.Size || 0), 0);
 
     res.json({ totalFiles, totalSize });
   } catch (err) {
