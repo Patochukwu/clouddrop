@@ -14,7 +14,7 @@ Before you clone and run this project, make sure you have the following installe
 |-----|-------------|-----------------|----------|
 | **VS Code** | Any | Code editor for editing project files | [code.visualstudio.com](https://code.visualstudio.com) |
 | **Antigravity** | Any | AI coding assistant (used to build this project) | [Available inside VS Code](https://code.visualstudio.com) |
-| **Node.js** | v18+ | Runs the backend server & frontend build | [nodejs.org](https://nodejs.org) |
+| **Node.js** | v24+ | Runs the backend server & frontend build | [nodejs.org](https://nodejs.org) |
 | **npm** | v9+ | Installs all packages (comes with Node.js) | Included with Node.js |
 | **Git** | Any | To clone the repository | [git-scm.com](https://git-scm.com) |
 
