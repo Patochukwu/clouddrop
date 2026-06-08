@@ -44,20 +44,34 @@ const getCategory = (mimeType = '') => {
   return 'Others';
 };
 
-// ── Multer-S3 storage ─────────────────────────────────────────
-const storage = multerS3({
-  s3,
-  bucket: process.env.S3_BUCKET_NAME,
-  contentType: multerS3.AUTO_CONTENT_TYPE,
-  metadata: (_req, file, cb) => {
-    cb(null, { originalName: file.originalname });
-  },
-  key: (_req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    const key = `uploads/${randomUUID()}${ext}`;
-    cb(null, key);
-  },
-});
+// ── Lazy storage factory ───────────────────────────────────────
+// Storage is created per-request so a missing env var does NOT
+// crash the server at startup — it returns a clear error instead.
+function getStorage() {
+  const bucket = process.env.S3_BUCKET_NAME;
+
+  if (!bucket) {
+    throw new Error(
+      '[CloudDrop] S3_BUCKET_NAME is not set in your server/.env file.\n' +
+      '  Copy .env.example → server/.env and fill in your AWS credentials.\n' +
+      '  See README.md → Prerequisites for setup instructions.'
+    );
+  }
+
+  return multerS3({
+    s3,
+    bucket,
+    contentType: multerS3.AUTO_CONTENT_TYPE,
+    metadata: (_req, file, cb) => {
+      cb(null, { originalName: file.originalname });
+    },
+    key: (_req, file, cb) => {
+      const ext = path.extname(file.originalname);
+      const key = `uploads/${randomUUID()}${ext}`;
+      cb(null, key);
+    },
+  });
+}
 
 // ── File filter ────────────────────────────────────────────────
 const fileFilter = (_req, file, cb) => {
@@ -65,8 +79,26 @@ const fileFilter = (_req, file, cb) => {
   cb(null, true);
 };
 
+// ── Multer instance (lazy storage) ────────────────────────────
 const upload = multer({
-  storage,
+  storage: {
+    _handleFile(req, file, cb) {
+      try {
+        const storage = getStorage();
+        storage._handleFile(req, file, cb);
+      } catch (err) {
+        cb(err);
+      }
+    },
+    _removeFile(req, file, cb) {
+      try {
+        const storage = getStorage();
+        storage._removeFile(req, file, cb);
+      } catch (err) {
+        cb(err);
+      }
+    },
+  },
   fileFilter,
   limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
 });
