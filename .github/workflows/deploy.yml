@@ -42,5 +42,5 @@ jobs:
             git pull origin clouddrop
             cd server && npm ci
             cd ../client && npm ci && npm run build
-            pm2 restart clouddrop-server || pm2 start server/server.js --name clouddrop-server
+            pm2 restart clouddrop-server --update-env || pm2 start server/server.js --name clouddrop-server
             pm2 save
