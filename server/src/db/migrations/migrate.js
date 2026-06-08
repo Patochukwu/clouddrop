@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../../../.env') });
 const pool = require('../pool');
 
 async function runMigrations() {
@@ -17,7 +18,6 @@ async function runMigrations() {
 }
 
 if (require.main === module) {
-  require('dotenv').config({ path: path.resolve(__dirname, '../../../.env') });
   runMigrations()
     .then(() => pool.end())
     .catch(() => process.exit(1));
