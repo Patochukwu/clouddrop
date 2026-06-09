@@ -92,20 +92,25 @@ const uploadFile = async (req, res, next) => {
 // ── List files ────────────────────────────────────────────────
 const listFiles = async (req, res, next) => {
   try {
-    // ─── Return Output from DB immediately (super fast) ───
     const { category, search } = req.query;
+
+    // Fetch S3 objects once — used by both the DB sync and the direct fallback
+    let s3Objects = [];
+    try {
+      const s3Command = new ListObjectsV2Command({
+        Bucket: process.env.S3_BUCKET_NAME,
+        Prefix: 'uploads/',
+      });
+      const s3Data = await s3.send(s3Command);
+      s3Objects = (s3Data.Contents || []).filter(item => item.Key !== 'uploads/');
+    } catch (s3Err) {
+      console.error('⚠️ S3 list failed:', s3Err.message);
+    }
 
     if (isDbEnabled()) {
       // ─── Background Sync S3 to DB (Prevents API Lag) ───
       (async () => {
         try {
-          const s3Command = new ListObjectsV2Command({
-            Bucket: process.env.S3_BUCKET_NAME,
-            Prefix: 'uploads/',
-          });
-          const s3Data = await s3.send(s3Command);
-          const s3Objects = (s3Data.Contents || []).filter(item => item.Key !== 'uploads/');
-
           const dbResult = await pool.query('SELECT s3_key FROM files');
           const dbKeys = new Set(dbResult.rows.map(row => row.s3_key));
           const s3Keys = new Set(s3Objects.map(obj => obj.Key));
@@ -166,7 +171,7 @@ const listFiles = async (req, res, next) => {
       }
     }
 
-    // Direct S3 fallback listing
+    // Direct S3 fallback listing (s3Objects is always defined above)
     let filesList = s3Objects.map(obj => {
       const originalName = obj.Key.substring(obj.Key.lastIndexOf('/') + 1);
       const mimeType = inferMimeType(originalName);
