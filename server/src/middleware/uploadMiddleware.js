@@ -63,7 +63,8 @@ function getStorage() {
     bucket,
     contentType: multerS3.AUTO_CONTENT_TYPE,
     metadata: (_req, file, cb) => {
-      cb(null, { originalName: file.originalname });
+      // URL-encode metadata values to prevent AWS signature mismatches with special/Unicode characters
+      cb(null, { originalName: encodeURIComponent(file.originalname) });
     },
     key: (_req, file, cb) => {
       const ext = path.extname(file.originalname);

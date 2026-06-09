@@ -24,4 +24,6 @@ router.get('/:id/download', downloadFile);
 // DELETE /api/files/:id
 router.delete('/:id', deleteFile);
 
+router.get('/test', (_req, res) => { res.json({ status: "ok", message: "API is running" }); });
+
 module.exports = router;

@@ -1,5 +1,6 @@
-require('dotenv').config();
-const app = require('./src/app');
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+const app = require('./src/app.js');
 const { runMigrations } = require('./src/db/migrations/migrate');
 
 const PORT = process.env.PORT || 5000;

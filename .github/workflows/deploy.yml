@@ -39,8 +39,11 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd /home/ubuntu/clouddrop
-            git pull origin main
+            git pull origin clouddrop
             cd server && npm ci
-            cd ../client && npm ci && npm run build
-            pm2 restart clouddrop-server || pm2 start server/server.js --name clouddrop-server
+            cd ../client && VITE_API_URL=${{ secrets.VITE_API_URL }} npm ci && VITE_API_URL=${{ secrets.VITE_API_URL }} npm run build
+            # Kill any stale/zombie PM2 processes except clouddrop-server
+            pm2 delete all || true
+            # Start fresh with the correct process only
+            pm2 start server/server.js --name clouddrop-server
             pm2 save
