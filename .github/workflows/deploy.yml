@@ -38,12 +38,23 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            set -e
             cd /home/ubuntu/clouddrop
-            git pull origin clouddrop
-            cd server && npm ci
-            cd ../client && VITE_API_URL=${{ secrets.VITE_API_URL }} npm ci && VITE_API_URL=${{ secrets.VITE_API_URL }} npm run build
-            # Kill any stale/zombie PM2 processes except clouddrop-server
-            pm2 delete all || true
-            # Start fresh with the correct process only
-            pm2 start server/server.js --name clouddrop-server
+
+            # Force-sync to latest remote state (avoids merge conflicts from local file changes)
+            git fetch origin clouddrop
+            git checkout clouddrop
+            git reset --hard origin/clouddrop
+
+            # Install server deps
+            cd server && npm ci && cd ..
+
+            # Install and build client
+            cd client && npm ci && VITE_API_URL=/api npm run build && cd ..
+
+            # Restart the server process (or start it fresh if not running)
+            pm2 describe clouddrop-server > /dev/null 2>&1 \
+              && pm2 restart clouddrop-server \
+              || pm2 start /home/ubuntu/clouddrop/server/server.js --name clouddrop-server
+
             pm2 save

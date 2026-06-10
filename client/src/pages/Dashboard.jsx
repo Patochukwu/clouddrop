@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import Header from '../components/Header';
 import StatsRow from '../components/StatsRow';
 import UploadZone from '../components/UploadZone';
 import SearchBar from '../components/SearchBar';
 import CategoryTabs from '../components/CategoryTabs';
 import FileGrid from '../components/FileGrid';
+import DeleteConfirmModal from '../components/DeleteConfirmModal';
 import { useFiles } from '../hooks/useFiles';
 import { useUpload } from '../hooks/useUpload';
 import { FolderOpen, Upload } from 'lucide-react';
@@ -19,9 +20,35 @@ export default function Dashboard() {
 
   const { upload, uploading, progress } = useUpload(refresh);
 
+  // ── Delete confirmation modal state ────────────────────────
+  const [pendingDelete, setPendingDelete] = useState(null); // { id, name }
+
+  const handleDeleteRequest = (id, name) => {
+    setPendingDelete({ id, name });
+  };
+
+  const handleDeleteConfirm = () => {
+    if (pendingDelete) {
+      deleteFile(pendingDelete.id, pendingDelete.name);
+    }
+    setPendingDelete(null);
+  };
+
+  const handleDeleteCancel = () => {
+    setPendingDelete(null);
+  };
+
   return (
     <div className="app-wrapper">
       <Header connected={true} />
+
+      {/* ── Delete Confirmation Modal ── */}
+      <DeleteConfirmModal
+        isOpen={!!pendingDelete}
+        fileName={pendingDelete?.name || ''}
+        onConfirm={handleDeleteConfirm}
+        onCancel={handleDeleteCancel}
+      />
 
       <main className="main-content">
         {/* ── Stats ── */}
@@ -55,7 +82,7 @@ export default function Dashboard() {
             <FileGrid
               files={files}
               loading={loading}
-              onDelete={deleteFile}
+              onDelete={handleDeleteRequest}
               onDownload={downloadFile}
               onPreview={previewFile}
             />
@@ -66,3 +93,4 @@ export default function Dashboard() {
     </div>
   );
 }
+
