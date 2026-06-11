@@ -283,3 +283,8 @@ clouddrop/
 | POST | `/api/files/upload` | Upload file to S3 |
 | GET | `/api/files/:id/download` | Get presigned download URL |
 | DELETE | `/api/files/:id` | Delete from S3 + DB |
+
+
+ ## Contributors
+
+Chukwuma chisom linda
