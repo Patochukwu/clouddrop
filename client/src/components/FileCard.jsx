@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   Video, Image, FileText, Music, Archive, Code, File,
-  Copy, ExternalLink, Trash2, Eye
+  Copy, Download, Trash2, Eye
 } from 'lucide-react';
 
 const formatBytes = (bytes) => {
@@ -85,7 +85,7 @@ export default function FileCard({ file, onDelete, onDownload, onPreview }) {
             onClick={() => onDownload(file.id, file.original_name)}
             id={`download-${file.id}`}
           >
-            <ExternalLink size={13} />
+            <Download size={13} />
           </button>
           <button
             className="file-action-btn delete"

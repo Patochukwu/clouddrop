@@ -33,6 +33,9 @@ const inferMimeType = (filename) => {
   if (ext === '.pdf') return 'application/pdf';
   if (ext === '.zip') return 'application/zip';
   if (ext === '.txt') return 'text/plain';
+  if (ext === '.pptx' || ext === '.ppt') return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+  if (ext === '.docx' || ext === '.doc') return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  if (ext === '.xlsx' || ext === '.xls') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   return 'application/octet-stream';
 };
 

@@ -67,7 +67,7 @@ export default function UploadZone({ onUpload, uploading, progress }) {
           Drag &amp; drop files here or{' '}
           <span className="browse-link">browse</span>
         </p>
-        <p className="drop-hint">Support files up to 50 MB</p>
+        <p className="drop-hint">Support files up to 100 MB</p>
       </div>
 
       {/* Selected file preview */}
