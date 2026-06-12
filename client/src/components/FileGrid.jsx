@@ -1,8 +1,14 @@
-import React from 'react';
-import FileCard from './FileCard';
-import { FolderOpen } from 'lucide-react';
+import React from "react";
+import FileCard from "./FileCard";
+import { FolderOpen } from "lucide-react";
 
-export default function FileGrid({ files, loading, onDelete, onDownload, onPreview }) {
+export default function FileGrid({
+  files,
+  loading,
+  onDelete,
+  onDownload,
+  onPreview,
+}) {
   if (loading) {
     return (
       <div className="file-grid">
@@ -19,8 +25,14 @@ export default function FileGrid({ files, loading, onDelete, onDownload, onPrevi
         <div className="empty-state">
           <FolderOpen size={40} />
           <p>No files found</p>
-          <p style={{ fontSize: '0.78rem', marginTop: 4, color: 'var(--text-muted)' }}>
-            Upload a file to get started
+          <p
+            style={{
+              fontSize: "0.78rem",
+              marginTop: 4,
+              color: "var(--text-muted)",
+            }}
+          >
+            Upload yourfile to get started
           </p>
         </div>
       </div>
