@@ -13,7 +13,7 @@ export default function Header({ connected = true }) {
         </div>
         <div className="header-title">
           <h1>CloudDrop</h1>
-          <span>AWS S3 File Storage Dashboard</span>
+          <span>AWS File Upload App</span>
         </div>
       </div>
 
