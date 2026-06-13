@@ -1,6 +1,6 @@
 # CloudDrop 🌩️
 
-> AWS S3 File Upload Dashboard — React + Node.js + PostgreSQL + GitHub Actions
+> AWS File Upload App — React + Node.js + PostgreSQL + GitHub Actions
 
 ---
 
